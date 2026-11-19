@@ -6,19 +6,96 @@
 <meta name="robots" content="noindex">
 <title>Call</title>
 <style>
-  body { font: 20px -apple-system, system-ui, sans-serif; text-align: center; padding: 40px 16px; background: #fff; color: #111; }
-  a { display: inline-block; margin-top: 16px; padding: 14px 28px; border-radius: 10px; background: #1a7f37; color: #fff; text-decoration: none; }
+  body { font: 18px -apple-system, system-ui, sans-serif; text-align: center; padding: 32px 16px; margin: 0 auto; max-width: 480px; background: #fff; color: #111; }
+  #msg { font-size: 22px; font-weight: 600; }
+  #who { color: #555; margin-top: 6px; line-height: 1.4; }
+  a.call { display: inline-block; margin-top: 16px; padding: 14px 28px; border-radius: 10px; background: #1a7f37; color: #fff; text-decoration: none; }
+  #log { margin-top: 28px; text-align: left; }
+  #results { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  #results button { font: inherit; font-size: 16px; padding: 14px 8px; border: 1px solid #ccc; border-radius: 10px; background: #f6f6f6; color: #111; }
+  #results button.on { border: 2px solid #111; font-weight: 600; }
+  textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; padding: 10px; border: 1px solid #ccc; border-radius: 10px; min-height: 70px; }
+  label { display: block; margin-top: 10px; }
+  #status { margin-top: 14px; text-align: center; color: #555; min-height: 1.4em; }
+  .small { font-size: 15px; color: #555; }
 </style>
 </head>
 <body>
 <!-- Click-to-call for the Google Sheets app, which only opens https links.
-     Link here as https://therealmikemark.github.io/call/#4075551234 - the number stays after the #,
-     so it's never sent to GitHub. -->
+     Link here as https://therealmikemark.github.io/call/#4075551234 - everything after the # stays in the phone,
+     so it's never sent to GitHub.
+     With &c=<case #>&s=<Apps Script deployment ID>&k=<key> added, opening the page also adds 1 to Called on the
+     sheet, and the result buttons log the call (preforeclosure-scraper/apps_script/call_log.gs). -->
 <div id="msg">No number in the link.</div>
-<a id="call" hidden>Call</a>
+<div id="who"></div>
+<a id="call" class="call" hidden>Call</a>
+<div id="log" hidden>
+  <div class="small">How did it go? Tap a result to save it.</div>
+  <div id="results"></div>
+  <label class="small" for="note">Note (goes in the row's Notes)</label>
+  <textarea id="note" placeholder="Optional"></textarea>
+  <label><input type="checkbox" id="quality"> Quality convo</label>
+  <div id="status"></div>
+</div>
 <script>
-  var digits = location.hash.replace(/\D/g, "");
+  var COLORS = {"Voicemail confirms": "#D9EAD3", "Talked": "#B7E1CD", "Has it handled": "#B7E1CD", "Callback": "#C9DAF8",
+                "Not interested": "#FCE5CD", "No answer": "#FFF2CC", "Left voicemail": "#FFF2CC", "Wrong number": "#EFEFEF"};
+  var hash = location.hash.slice(1);
+  var parts = hash.split("&");
+  var params = new URLSearchParams(parts.slice(1).join("&"));
+  var digits = parts[0].replace(/\D/g, "");
   if (digits.length === 10) digits = "1" + digits;
+  var logging = params.get("c") && /^[\w-]+$/.test(params.get("s") || "") && params.get("k");
+  var endpoint = logging ? "https://script.google.com/macros/s/" + params.get("s") + "/exec" : "";
+  var status = document.getElementById("status");
+
+  function send(body) {
+    body.key = params.get("k");
+    body.case = params.get("c");
+    body.digits = digits;
+    return fetch(endpoint, {method: "POST", body: JSON.stringify(body), keepalive: true,
+                            headers: {"Content-Type": "text/plain;charset=utf-8"}})  // text/plain skips the CORS preflight
+      .then(function (r) { return r.json(); })
+      .then(function (data) { if (data.error) throw new Error(data.error); return data; });
+  }
+
+  function showResults(list, current) {
+    var box = document.getElementById("results");
+    box.innerHTML = "";
+    list.forEach(function (result) {
+      var b = document.createElement("button");
+      b.textContent = result;
+      b.style.background = COLORS[result] || "";
+      if (result === current) b.className = "on";
+      b.onclick = function () { saveResult(result, b); };
+      box.appendChild(b);
+    });
+    document.getElementById("log").hidden = false;
+  }
+
+  function saveResult(result, button) {
+    status.textContent = "Saving...";
+    send({action: "result", result: result, note: document.getElementById("note").value,
+          quality: document.getElementById("quality").checked})
+      .then(function (data) {
+        Array.prototype.forEach.call(document.querySelectorAll("#results button"), function (b) { b.className = ""; });
+        button.className = "on";
+        document.getElementById("note").value = "";  // So saving again doesn't add the note twice
+        status.textContent = data.saved ? "Saved ✓ " + result : "Saved to the row, but this number isn't on the Contacts tab";
+      })
+      .catch(function (e) { status.textContent = "Not saved: " + e.message; });
+  }
+
+  function openCall(dial) {
+    return send({action: "open", dial: dial}).then(function (data) {
+      var who = [data.name, data.role].filter(Boolean).join(" · ");
+      document.getElementById("who").textContent = [who, data.address].filter(Boolean).join("\n");
+      document.getElementById("who").style.whiteSpace = "pre-line";
+      status.textContent = data.found ? "Dials on this property: " + (data.called || 0) : "Case not found on the Auction tab";
+      showResults(data.results, data.result);
+    }).catch(function (e) { status.textContent = "Couldn't reach the sheet: " + e.message; document.getElementById("log").hidden = false; });
+  }
+
   if (digits.length === 11) {
     var tel = "tel:+" + digits;
     var shown = "(" + digits.slice(1, 4) + ") " + digits.slice(4, 7) + "-" + digits.slice(7);
@@ -27,7 +104,17 @@
     link.href = tel;
     link.textContent = "Call " + shown;
     link.hidden = false;
-    location.replace(tel);
+    if (logging) {
+      // A reload of the same link doesn't count as another dial; "Call again" does
+      var seen = false;
+      try { seen = sessionStorage.getItem("dialed:" + hash) === "1"; sessionStorage.setItem("dialed:" + hash, "1"); } catch (e) {}
+      openCall(!seen);
+      link.textContent = "Call again";
+      link.onclick = function () { openCall(true); };
+      if (!seen) location.replace(tel);
+    } else {
+      location.replace(tel);
+    }
   }
 </script>
 </body>
