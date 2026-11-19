@@ -8,7 +8,7 @@
 <style>
   body { font: 18px -apple-system, system-ui, sans-serif; text-align: center; padding: 32px 16px; margin: 0 auto; max-width: 480px; background: #fff; color: #111; }
   #msg { font-size: 22px; font-weight: 600; }
-  #who { color: #555; margin-top: 6px; line-height: 1.4; }
+  #who { font-size: 22px; margin-top: 10px; line-height: 1.4; }
   a.call { display: inline-block; margin-top: 16px; padding: 14px 28px; border-radius: 10px; background: #1a7f37; color: #fff; text-decoration: none; }
   #log { margin-top: 28px; text-align: left; }
   #results { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
@@ -24,6 +24,7 @@
 <!-- Click-to-call for the Google Sheets app, which only opens https links.
      Link here as https://therealmikemark.github.io/call/#4075551234 - everything after the # stays in the phone,
      so it's never sent to GitHub.
+     &n=<name>&r=<role> show who you're calling.
      With &c=<case #>&s=<Apps Script deployment ID>&k=<key> added, opening the page also adds 1 to Called on the
      sheet, and the result buttons log the call (preforeclosure-scraper/apps_script/call_log.gs). -->
 <div id="msg">No number in the link.</div>
@@ -88,15 +89,21 @@
 
   function openCall(dial) {
     return send({action: "open", dial: dial}).then(function (data) {
-      var who = [data.name, data.role].filter(Boolean).join(" · ");
-      document.getElementById("who").textContent = [who, data.address].filter(Boolean).join("\n");
-      document.getElementById("who").style.whiteSpace = "pre-line";
+      showWho(data.name || params.get("n"), data.role || params.get("r"), data.address);
       status.textContent = data.found ? "Dials on this property: " + (data.called || 0) : "Case not found on the Auction tab";
       showResults(data.results, data.result);
     }).catch(function (e) { status.textContent = "Couldn't reach the sheet: " + e.message; document.getElementById("log").hidden = false; });
   }
 
+  function showWho(name, role, address) {
+    var who = [name, role].filter(Boolean).join(" · ");
+    var el = document.getElementById("who");
+    el.textContent = [who, address].filter(Boolean).join("\n");
+    el.style.whiteSpace = "pre-line";
+  }
+
   if (digits.length === 11) {
+    showWho(params.get("n"), params.get("r"));  // From the link, so it's on screen before the call starts
     var tel = "tel:+" + digits;
     var shown = "(" + digits.slice(1, 4) + ") " + digits.slice(4, 7) + "-" + digits.slice(7);
     document.getElementById("msg").textContent = shown;
