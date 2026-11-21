@@ -26,6 +26,7 @@
      Link here as https://therealmikemark.github.io/call/#4075551234 - everything after the # stays in the phone,
      so it's never sent to GitHub.
      &n=<name>&r=<role> show who you're calling.
+     #sms4075551234&b=<message> opens Messages to that number with the message filled in (direct-to-agent texts).
      With &c=<case #>&s=<Apps Script deployment ID>&k=<key> added, opening the page also adds 1 to Called on the
      sheet, and the result buttons log the call (preforeclosure-scraper/apps_script/call_log.gs). -->
 <div id="msg">No number in the link.</div>
@@ -46,6 +47,7 @@
   var hash = location.hash.slice(1);
   var parts = hash.split("&");
   var params = new URLSearchParams(parts.slice(1).join("&"));
+  var texting = /^sms/.test(parts[0]);  // #sms4075551234&b=<message> opens Messages with the text filled in
   var digits = parts[0].replace(/\D/g, "");
   if (digits.length === 10) digits = "1" + digits;
   var logging = params.get("c") && /^[\w-]+$/.test(params.get("s") || "") && params.get("k");
@@ -120,7 +122,15 @@
     el.style.whiteSpace = "pre-line";
   }
 
-  if (digits.length === 11) {
+  if (texting && digits.length === 11) {
+    var sms = "sms:+" + digits + "&body=" + encodeURIComponent(params.get("b") || "");
+    document.getElementById("msg").textContent = "Text (" + digits.slice(1, 4) + ") " + digits.slice(4, 7) + "-" + digits.slice(7);
+    var textLink = document.getElementById("call");
+    textLink.href = sms;
+    textLink.textContent = "Open Messages";
+    textLink.hidden = false;
+    location.replace(sms);
+  } else if (digits.length === 11) {
     showWho(params.get("n"), params.get("r"));  // From the link, so it's on screen before the call starts
     var tel = "tel:+" + digits;
     var shown = "(" + digits.slice(1, 4) + ") " + digits.slice(4, 7) + "-" + digits.slice(7);
